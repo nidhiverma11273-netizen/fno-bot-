@@ -1,23 +1,24 @@
-name: FNO Alert
+name: F&O Bot
+
 on:
   schedule:
-    on:
-  schedule:
-    - cron: '35 3 * * 1-5' # 9:05 AM IST
-    - cron: '0 4 * * 1-5' # 9:30 AM
-    - cron: '30 5 * * 1-5' # 11:00 AM
+    - cron: '35 3 * * 1-5'
+    - cron: '0 4 * * 1-5'
+    - cron: '30 5 * * 1-5'
   workflow_dispatch:
+
 jobs:
-  alert:
+  run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      - run: pip install --upgrade pip
-      - run: pip install -r requirements.txt
-      - run: python bot.py
+      - name: Install deps
+        run: pip install yfinance requests pytz
+      - name: Run bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python bot.py
