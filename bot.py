@@ -35,7 +35,7 @@ def scan():
                 pct = ((curr-prev_close)/prev_close)*100
                 intra = ((high-low)/low)*100 if low else 0
                 logs.append(f"{sym.replace('.NS','')}: {curr:.0f} {pct:+.2f}% intra {intra:.1f}%")
-                if pct>=1.0 or intra>=1.8:
+                if pct>=1.2 and pct<8: # sirf real breakout
                     bull.append((sym.replace('.NS',''),curr,pct,intra))
             except Exception as e:
                 logs.append(f"{sym} err")
