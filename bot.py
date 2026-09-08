@@ -6,7 +6,6 @@ from datetime import datetime
 
 IST = pytz.timezone('Asia/Kolkata')
 
-# ========= TUMHARI WATCHLIST SECTOR INDEX =========
 SECTOR_INDEX = {
     "PHARMA": "^CNXPHARMA",
     "AUTO": "^CNXAUTO",
@@ -22,7 +21,7 @@ SECTOR_INDEX = {
 }
 
 STOCKS = {
-    "PHARMA": ["SUNPHARMA.NS","DIVISLAB.NS","CIPLA.NS","DRREDDY.NS","LUPIN.NS"],
+    "PHARMA": ["SUNPHARMA.NS","DIVISLAB.NS","CIPLA.NS","DRREDDY.NS","LUPIN.NS","LAURUSLABS.NS","AUROPHARMA.NS","IPCALAB.NS"],
     "AUTO": ["MARUTI.NS","TATAMOTORS.NS","M&M.NS","EICHERMOT.NS","BAJAJ-AUTO.NS"],
     "ENERGY": ["RELIANCE.NS","NTPC.NS","ONGC.NS","POWERGRID.NS"],
     "PVT BANK": ["HDFCBANK.NS","ICICIBANK.NS","KOTAKBANK.NS","AXISBANK.NS","INDUSINDBK.NS"],
@@ -46,7 +45,7 @@ def send(msg):
     except Exception as e:
         print(e)
 
-def get_top_sector():
+def get_top_sectors():
     perf = {}
     tickers = list(SECTOR_INDEX.values())
     try:
@@ -66,74 +65,84 @@ def get_top_sector():
     except:
         pass
     if not perf:
-        return "DEFENCE", 0, {}
-    top = max(perf, key=perf.get)
-    return top, perf[top], perf
+        return [("DEFENCE", 0)], perf
+    sorted_perf = sorted(perf.items(), key=lambda x: x[1], reverse=True)
+    return sorted_perf[:2], perf # TOP 2
+
+def check_3g_red_low_vol(df):
+    if len(df) < 30:
+        return False
+    df = df.dropna()
+    c1 = df.iloc[-4]
+    c2 = df.iloc[-3]
+    c3 = df.iloc[-2]
+    c4 = df.iloc[-1]
+    green1 = c1['Close'] > c1['Open']
+    green2 = c2['Close'] > c2['Open']
+    green3 = c3['Close'] > c3['Open']
+    red = c4['Close'] < c4['Open']
+    if not (green1 and green2 and green3 and red):
+        return False
+    avg_vol = (c1['Volume'] + c2['Volume'] + c3['Volume']) / 3
+    if avg_vol == 0:
+        return False
+    low_vol = c4['Volume'] < (avg_vol * 0.85)
+    if not low_vol:
+        return False
+    prev_close = df['Close'].iloc[-16]
+    curr = df['Close'].iloc[-1]
+    pct = ((curr - prev_close) / prev_close) * 100
+    if pct < 0.5:
+        return False
+    return True, float(curr), float(pct)
 
 def scan():
     now = datetime.now(IST).strftime("%d-%m %I:%M %p")
     try:
-        top_sec, top_pct, all_perf = get_top_sector()
+        top2, all_perf = get_top_sectors()
         sorted_perf = sorted(all_perf.items(), key=lambda x: x[1], reverse=True)
-        perf_txt = "\n".join([f"{k}: {v:+.2f}%" for k, v in sorted_perf[:3]])
+        perf_txt = "\n".join([f"{k}: {v:+.2f}%" for k, v in sorted_perf[:4]])
 
-        if top_pct < 0.1:
-            send(f"ℹ️ <b>{now}</b> No sector up today\nTop: {top_sec} {top_pct:+.2f}%\n{perf_txt}")
+        if top2[0][1] < 0.1:
+            send(f"ℹ️ <b>{now}</b> No sector up today\n{perf_txt}")
             return
 
-        SYMS = STOCKS.get(top_sec, STOCKS["DEFENCE"])
-        data = yf.download(SYMS, period="5d", interval="15m", group_by='ticker', progress=False, threads=True)
+        final_msg = f"🔥 <b>BREAKOUT {now}</b>\n{perf_txt}\n"
+        found_any = False
 
-        bull = []
-        for sym in SYMS:
+        for sec_name, sec_pct in top2:
+            SYMS = STOCKS.get(sec_name, [])
+            if not SYMS:
+                continue
             try:
-                df = data[sym] if len(SYMS) > 1 else data
-                if df.empty or len(df) < 30:
-                    continue
-                df = df.dropna()
-                if len(df) < 30:
-                    continue
-
-                # Teri condition: 3 Green + 1 Red Low Volume
-                c1 = df.iloc[-4]
-                c2 = df.iloc[-3]
-                c3 = df.iloc[-2]
-                c4 = df.iloc[-1]
-
-                green1 = c1['Close'] > c1['Open']
-                green2 = c2['Close'] > c2['Open']
-                green3 = c3['Close'] > c3['Open']
-                red = c4['Close'] < c4['Open']
-
-                if not (green1 and green2 and green3 and red):
-                    continue
-
-                avg_vol = (c1['Volume'] + c2['Volume'] + c3['Volume']) / 3
-                low_vol = c4['Volume'] < (avg_vol * 0.85)
-
-                if not low_vol:
-                    continue
-
-                prev_close = df['Close'].iloc[-16]
-                curr = df['Close'].iloc[-1]
-                pct = ((curr - prev_close) / prev_close) * 100
-
-                if pct < 0.5:
-                    continue
-
-                bull.append((sym.replace('.NS',''), float(curr), float(pct)))
-
+                data = yf.download(SYMS, period="5d", interval="15m", group_by='ticker', progress=False, threads=True)
             except:
                 continue
 
-        if bull:
-            msg = f"🔥 <b>BREAKOUT {now}</b>\n<b>TOP SECTOR: {top_sec} ({top_pct:+.2f}%)</b>\n{perf_txt}\n\n<b>3 Green + Red Low Vol:</b>\n"
-            for s, c, p in bull:
-                msg += f"• {s} {c:.0f} ({p:+.2f}%)\n"
-        else:
-            msg = f"ℹ️ <b>{now}</b> No 3G+Red setup in TOP sector\n<b>TOP SECTOR: {top_sec} ({top_pct:+.2f}%)</b>\n{perf_txt}"
+            bull = []
+            for sym in SYMS:
+                try:
+                    df = data[sym] if len(SYMS) > 1 else data
+                    if df.empty:
+                        continue
+                    res = check_3g_red_low_vol(df)
+                    if not res:
+                        continue
+                    _, curr, pct = res
+                    bull.append((sym.replace('.NS',''), curr, pct))
+                except:
+                    continue
 
-        send(msg)
+            if bull:
+                found_any = True
+                final_msg += f"\n<b>TOP: {sec_name} ({sec_pct:+.2f}%) - 3G+Red Low Vol:</b>\n"
+                for s, c, p in bull:
+                    final_msg += f"• {s} {c:.0f} ({p:+.2f}%)\n"
+
+        if not found_any:
+            final_msg += f"\nNo 3G+Red setup in TOP 2 sectors"
+
+        send(final_msg)
 
     except Exception as e:
         send(f"❌ Error {now}: {e}")
