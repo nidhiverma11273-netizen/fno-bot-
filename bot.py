@@ -18,8 +18,8 @@ SECTOR_INDEX = {
     "REALTY": "^CNXREALTY",
     "INFRA": "^CNXINFRA",
     "DEFENCE": "HAL.NS",
-    "TELECOM": "BHARTIARTL.NS",
-    "FINTECH": "PAYTM.NS",
+    "TELECOM": "^CNXIT",
+    "FINTECH": "^CNXIT",
 }
 
 STOCKS = {
@@ -34,13 +34,4 @@ STOCKS = {
     "REALTY": ["DLF.NS","GODREJPROP.NS","LODHA.NS"],
     "INFRA": ["LT.NS","ADANIENT.NS","ADANIPORTS.NS","ADANIPOWER.NS","POLYCAB.NS","BSE.NS","GRSE.NS","INDUSTOWER.NS"],
     "DEFENCE": ["HAL.NS","BEL.NS","SOLARINDS.NS","MAZDOCK.NS","BEML.NS","COCHINSHIP.NS"],
-    "TELECOM": ["BHARTIARTL.NS","INDUSTOWER.NS","IDEA.NS","INDUSINDBK.NS"],
-    "FINTECH": ["PAYTM.NS","KOTAKBANK.NS","HDFCBANK.NS","AXISBANK.NS"],
-}
-
-def send(msg):
-    BOT = os.environ.get('BOT_TOKEN')
-    CHAT = os.environ.get('CHAT_ID')
-    if not BOT or not CHAT:
-        return
-    url = f"https://
+    "TELECOM": ["BHARTIARTL.NS","INDU
