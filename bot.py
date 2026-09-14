@@ -1,4 +1,4 @@
-print("BOT STARTED - checking holiday")
+print("BOT STARTED - 5min present day only")
 import yfinance as yf
 import requests
 import os
@@ -28,16 +28,15 @@ STOCKS = {
     "TELECOM": ["BHARTIARTL.NS","INDUSTOWER.NS","IDEA.NS"],
     "FINTECH": ["PAYTM.NS","HDFCBANK.NS"],
 }
+
 def send(msg):
     BOT=os.environ.get('BOT_TOKEN'); CHAT=os.environ.get('CHAT_ID')
-    print(f"DEBUG send: BOT={bool(BOT)} CHAT={bool(CHAT)} MSG={msg[:50]}")
-    if not BOT or not CHAT:
-        print("Missing secrets")
-        return
+    print(f"Send: {msg[:100]}")
+    if not BOT or not CHAT: return
     try:
         url=f"https://api.telegram.org/bot{str(BOT)}/sendMessage"
         r=requests.post(url,data={"chat_id":CHAT,"text":msg},timeout=10)
-        print(f"Telegram: {r.status_code} {r.text[:200]}")
+        print(f"Telegram: {r.status_code}")
     except Exception as e:
         print(f"Send fail {e}")
 
@@ -56,26 +55,46 @@ def get_top_sectors():
     if not perf: return [("DEFENCE",0)],perf
     return sorted(perf.items(),key=lambda x:x[1],reverse=True)[:2],perf
 
-def check_3g_red_low_vol(df):
-    if len(df)<30: return False
+def check_3g_red_low_vol_5min(df):
+    # KEWAL AAJ KI 5 MIN CANDLE
+    if len(df)<10: return False
     df=df.dropna().copy()
     try:
-        today=df.index[-1].date(); today_df=df[df.index.date==today]
-        if len(today_df)<4: return False
-        c1,c2,c3,c4=today_df.iloc[-4],today_df.iloc[-3],today_df.iloc[-2],today_df.iloc[-1]
-        if not (c1['Close']>c1['Open'] and c2['Close']>c2['Open'] and c3['Close']>c3['Open'] and c4['Close']<c4['Open']): return False
-        avg=(c1['Volume']+c2['Volume']+c3['Volume'])/3
-        if avg==0 or c4['Volume']>=avg*0.85: return False
-        pct=((df['Close'].iloc[-1]-df['Close'].iloc[-16])/df['Close'].iloc[-16])*100
-        if pct<0.5: return False
-        return True,float(df['Close'].iloc[-1]),float(pct)
-    except: return False
+        today = datetime.now(IST).date()
+        today_df = df[df.index.date == today] # <-- Kewal present day
+        print(f"Today {today} candles count: {len(today_df)}")
+        if len(today_df) < 4: # 3 green + 1 red ke liye kam se kam 4 candle chahiye
+            return False
+
+        c1,c2,c3,c4 = today_df.iloc[-4], today_df.iloc[-3], today_df.iloc[-2], today_df.iloc[-1]
+
+        # 3 Green + 1 Red
+        cond = (c1['Close']>c1['Open'] and c2['Close']>c2['Open'] and c3['Close']>c3['Open'] and c4['Close']<c4['Open'])
+        if not cond: return False
+
+        avg_vol = (c1['Volume']+c2['Volume']+c3['Volume'])/3
+        if avg_vol==0 or c4['Volume'] >= avg_vol*0.85: # Red ka volume low hona chahiye
+            return False
+
+        # Din ke start se kitna up hai
+        day_open = today_df['Open'].iloc[0]
+        curr_close = today_df['Close'].iloc[-1]
+        pct_day = ((curr_close - day_open)/day_open)*100
+        if pct_day < 0.5: # Kam se kam 0.5% up
+            return False
+
+        return True, float(curr_close), float(pct_day)
+    except Exception as e:
+        print(f"check fail {e}")
+        return False
 
 def scan():
     now_dt=datetime.now(IST); now=now_dt.strftime("%d-%m %I:%M %p")
-    print(f"Time check: {now_dt} weekday {now_dt.weekday()}")
+    print(f"Time: {now_dt} weekday {now_dt.weekday()}")
+
     if now_dt.weekday()>=5:
         msg=f"Weekend {now} Market Closed"; print(msg); send(msg); return
+
     try:
         nifty=yf.download("^NSEI",period="2d",interval="1d",progress=False)
         if not nifty.empty:
@@ -84,33 +103,42 @@ def scan():
             if last!=today:
                 msg=f"Holiday {now} Market Closed - NSE Holiday"; print(msg); send(msg); return
     except Exception as e: print(f"Holiday check fail {e}")
+
     try:
         top2,all_perf=get_top_sectors()
-        print(f"Sectors: {all_perf}")
         sorted_perf=sorted(all_perf.items(),key=lambda x:x[1],reverse=True)
         txt="\n".join([f"{k}: {v:+.2f}%" for k,v in sorted_perf[:6]])
+
         if not top2 or top2[0][1]<0.10:
             send(f"Info {now} No sector up\n{txt}"); return
-        msg=f"BREAKOUT {now}\n{txt}\n"; found=False
+
+        msg=f"BREAKOUT {now} (5min)\n{txt}\n"; found=False
+
         for sec_name,sec_pct in top2:
             syms=STOCKS.get(sec_name,[])
             if not syms: continue
-            try: data=yf.download(syms,period="5d",interval="15m",group_by='ticker',progress=False,threads=True)
+            try:
+                # YAHAN 5min kar diya - period 1d = kewal aaj ka data
+                data=yf.download(syms,period="1d",interval="5m",group_by='ticker',progress=False,threads=True)
             except: continue
+
             bull=[]
             for sym in syms:
                 try:
                     df=data[sym] if len(syms)>1 else data
                     if df.empty: continue
-                    res=check_3g_red_low_vol(df)
+                    res=check_3g_red_low_vol_5min(df)
                     if not res: continue
                     _,curr,pct=res; bull.append((sym.replace('.NS',''),curr,pct))
                 except: continue
+
             if bull:
                 found=True; msg+=f"\nTOP: {sec_name} {sec_pct:+.2f}%\n"
                 for s,c,p in bull: msg+=f"{s} {c:.0f} {p:+.2f}%\n"
-        if not found: msg+="\nNo 3G+Red Today"
+
+        if not found: msg+="\nNo 3G+Red Today (5min)"
         send(msg)
+
     except Exception as e:
         print(f"Error {e}"); send(f"Error {now}: {e}")
 
