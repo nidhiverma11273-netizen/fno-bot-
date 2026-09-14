@@ -1,22 +1,25 @@
 name: F&O Bot
 on:
   schedule:
-    - cron: '35 3 * * 1-5'
-    - cron: '0 4 * * 1-5'
-    - cron: '30 5 * * 1-5'
+    - cron: '15 3 * * 1-5'
+    - cron: '46 4 * * 1-5'
+    - cron: '34 5 * * 1-5'
   workflow_dispatch:
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Install deps
-        run: pip install yfinance requests pytz
-      - name: Run bot
+      - name: Install
+        run: pip install yfinance requests pytz pandas
+      - name: Run python bot.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python bot.py
+        run: |
+          echo "Starting bot..."
+          python bot.py
+          echo "Finished bot..."
