@@ -31,12 +31,14 @@ STOCKS = {
 
 def send(msg):
     BOT=os.environ.get('BOT_TOKEN'); CHAT=os.environ.get('CHAT_ID')
-    print(f"Send: {msg[:100]}")
-    if not BOT or not CHAT: return
+    print(f"Send: {msg[:150]}")
+    if not BOT or not CHAT:
+        print("Missing secrets")
+        return
     try:
         url=f"https://api.telegram.org/bot{str(BOT)}/sendMessage"
-        r=requests.post(url,data={"chat_id":CHAT,"text":msg},timeout=10)
-        print(f"Telegram: {r.status_code}")
+        r=requests.post(url,data={"chat_id":CHAT,"text":msg},timeout=15)
+        print(f"Telegram: {r.status_code} {r.text[:200]}")
     except Exception as e:
         print(f"Send fail {e}")
 
@@ -51,8 +53,9 @@ def get_top_sectors():
                 df=df.dropna(); pct=((df['Close'].iloc[-1]-df['Close'].iloc[-2])/df['Close'].iloc[-2])*100
                 perf[sec]=float(pct)
             except: continue
-    except: pass
-    if not perf: return [("DEFENCE",0)],perf
+    except Exception as e:
+        print(f"Sector fetch fail {e}")
+    if not perf: return [("PVT BANK",0)],perf
     return sorted(perf.items(),key=lambda x:x[1],reverse=True)[:2],perf
 
 def check_3g_red_low_vol_5min(df):
@@ -61,9 +64,9 @@ def check_3g_red_low_vol_5min(df):
     df=df.dropna().copy()
     try:
         today = datetime.now(IST).date()
-        today_df = df[df.index.date == today] # <-- Kewal present day
-        print(f"Today {today} candles count: {len(today_df)}")
-        if len(today_df) < 4: # 3 green + 1 red ke liye kam se kam 4 candle chahiye
+        today_df = df[df.index.date == today]
+        # print(f"Today {today} candles: {len(today_df)}")
+        if len(today_df) < 4:
             return False
 
         c1,c2,c3,c4 = today_df.iloc[-4], today_df.iloc[-3], today_df.iloc[-2], today_df.iloc[-1]
@@ -73,14 +76,13 @@ def check_3g_red_low_vol_5min(df):
         if not cond: return False
 
         avg_vol = (c1['Volume']+c2['Volume']+c3['Volume'])/3
-        if avg_vol==0 or c4['Volume'] >= avg_vol*0.85: # Red ka volume low hona chahiye
+        if avg_vol==0 or c4['Volume'] >= avg_vol*0.85:
             return False
 
-        # Din ke start se kitna up hai
         day_open = today_df['Open'].iloc[0]
         curr_close = today_df['Close'].iloc[-1]
         pct_day = ((curr_close - day_open)/day_open)*100
-        if pct_day < 0.5: # Kam se kam 0.5% up
+        if pct_day < 0.3:
             return False
 
         return True, float(curr_close), float(pct_day)
@@ -95,22 +97,29 @@ def scan():
     if now_dt.weekday()>=5:
         msg=f"Weekend {now} Market Closed"; print(msg); send(msg); return
 
-    try:
-        nifty=yf.download("^NSEI",period="2d",interval="1d",progress=False)
-        if not nifty.empty:
-            last=nifty.index[-1].date(); today=now_dt.date()
-            print(f"NSE last={last} today={today}")
-            if last!=today:
-                msg=f"Holiday {now} Market Closed - NSE Holiday"; print(msg); send(msg); return
-    except Exception as e: print(f"Holiday check fail {e}")
+    # === FIXED HOLIDAY CHECK ===
+    is_pre_market = now_dt.hour < 9 or (now_dt.hour==9 and now_dt.minute < 15)
+    if not is_pre_market:
+        try:
+            nifty=yf.download("^NSEI",period="5d",interval="1d",progress=False)
+            if not nifty.empty:
+                last=nifty.index[-1].date(); today=now_dt.date()
+                gap = (today - last).days
+                print(f"NSE last={last} today={today} gap={gap}")
+                if gap > 4: # 4 se zyada gap matlab sach me holiday
+                    msg=f"Holiday {now} Market Closed - NSE Holiday"; print(msg); send(msg); return
+        except Exception as e:
+            print(f"Holiday check fail {e}")
 
     try:
         top2,all_perf=get_top_sectors()
         sorted_perf=sorted(all_perf.items(),key=lambda x:x[1],reverse=True)
         txt="\n".join([f"{k}: {v:+.2f}%" for k,v in sorted_perf[:6]])
+        print(f"Top sectors: {top2}")
 
-        if not top2 or top2[0][1]<0.10:
-            send(f"Info {now} No sector up\n{txt}"); return
+        if not top2 or top2[0][1]<0.05:
+            msg=f"Info {now} No sector up\n{txt}\n\nNo 3G+Red Today (5min)"
+            print(msg); send(msg); return
 
         msg=f"BREAKOUT {now} (5min)\n{txt}\n"; found=False
 
@@ -118,9 +127,10 @@ def scan():
             syms=STOCKS.get(sec_name,[])
             if not syms: continue
             try:
-                # YAHAN 5min kar diya - period 1d = kewal aaj ka data
+                # Kewal aaj ka 5min data
                 data=yf.download(syms,period="1d",interval="5m",group_by='ticker',progress=False,threads=True)
-            except: continue
+            except Exception as e:
+                print(f"Stock DL fail {sec_name} {e}"); continue
 
             bull=[]
             for sym in syms:
