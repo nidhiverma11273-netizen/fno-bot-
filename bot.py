@@ -76,24 +76,34 @@ def get_top_sector():
 
 def is_nifty_green():
     try:
-        df = yf.download("^NSEI", period="1d", interval="5m", progress=False, threads=False)
-        if df.empty:
-            return True, 0, 0
+        # Try 1m first for live price
+        df = yf.download("^NSEI", period="1d", interval="1m", progress=False, threads=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df=df.dropna()
         today=datetime.now(IST).date()
-        tdf=df[df.index.date==today]
-        if len(tdf)<2:
-            d=yf.download("^NSEI", period="2d", interval="1d", progress=False, threads=False)
-            if not d.empty:
-                if isinstance(d.columns, pd.MultiIndex):
-                    d.columns=d.columns.get_level_values(0)
-                d=d.dropna()
-                o=float(d['Open'].iloc[-1])
-                c=float(d['Close'].iloc[-1])
-                return c>=o, o, c
-            return True,0,0
+        if not df.empty:
+            tdf=df[df.index.date==today]
+            if len(tdf)>=2:
+                o=float(tdf['Open'].iloc[0])
+                c=float(tdf['Close'].iloc[-1])
+                print(f"Nifty 1m O {o} C {c} Green {c>=o}")
+                return c>=o*0.998, o, c  # 0.2% tolerance, small red ko bhi green mano
+        # Fallback daily
+        d=yf.download("^NSEI", period="2d", interval="1d", progress=False, threads=False)
+        if isinstance(d.columns, pd.MultiIndex):
+            d.columns=d.columns.get_level_values(0)
+        d=d.dropna()
+        if not d.empty:
+            o=float(d['Open'].iloc[-1])
+            c=float(d['Close'].iloc[-1])
+            print(f"Nifty daily O {o} C {c}")
+            return c>=o*0.999, o, c
+        return True,0,0
+    except Exception as e:
+        print(f"Nifty check fail {e}")
+        return True,0,0
+
         o=float(tdf['Open'].iloc[0])
         c=float(tdf['Close'].iloc[-1])
         return c>=o, o, c
