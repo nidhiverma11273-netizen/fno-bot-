@@ -43,6 +43,7 @@ def send(msg):
     BOT = os.environ.get('BOT_TOKEN')
     CHAT = os.environ.get('CHAT_ID')
     if not BOT or not CHAT:
+        print("No secrets")
         return
     try:
         url = f"https://api.telegram.org/bot{BOT}/sendMessage"
@@ -50,162 +51,173 @@ def send(msg):
     except Exception as e:
         print(f"Send fail {e}")
 
-def get_top_sectors():
+def get_top_sector():
     perf = {}
     tickers = list(SECTOR_INDEX.values())
     try:
         data = yf.download(tickers, period="5d", interval="1d", group_by='ticker', progress=False, threads=True)
         for sec, ticker in SECTOR_INDEX.items():
             try:
-                df = data[ticker] if len(tickers) > 1 else data
+                df = data[ticker] if len(tickers)>1 else data
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
-                if len(df) < 2:
+                if len(df)<2:
                     continue
                 df = df.dropna()
-                pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
-                perf[sec] = float(pct)
+                pct = ((float(df['Close'].iloc[-1]) - float(df['Close'].iloc[-2])) / float(df['Close'].iloc[-2]))*100
+                perf[sec]=float(pct)
             except:
                 continue
     except Exception as e:
         print(f"Sector fail {e}")
     if not perf:
         return [("IT",0)], perf
-    return sorted(perf.items(), key=lambda x: x[1], reverse=True)[:1], perf
+    top1 = sorted(perf.items(), key=lambda x:x[1], reverse=True)[:1]
+    return top1, perf
 
 def is_nifty_green():
     try:
         df = yf.download("^NSEI", period="1d", interval="5m", progress=False, threads=False)
         if df.empty:
-            return True
+            return True, 0, 0
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-        df = df.dropna()
-        today = datetime.now(IST).date()
-        tdf = df[df.index.date == today]
-        if len(tdf) < 2:
-            # fallback daily
-            d = yf.download("^NSEI", period="2d", interval="1d", progress=False, threads=False)
+        df=df.dropna()
+        today=datetime.now(IST).date()
+        tdf=df[df.index.date==today]
+        if len(tdf)<2:
+            d=yf.download("^NSEI", period="2d", interval="1d", progress=False, threads=False)
             if not d.empty:
                 if isinstance(d.columns, pd.MultiIndex):
-                    d.columns = d.columns.get_level_values(0)
-                d = d.dropna()
-                if len(d) >= 1:
-                    o = float(d['Open'].iloc[-1])
-                    c = float(d['Close'].iloc[-1])
-                    print(f"Nifty Daily O {o} C {c}")
-                    return c >= o
-            return True
-        o = float(tdf['Open'].iloc[0])
-        c = float(tdf['Close'].iloc[-1])
-        print(f"Nifty 1d O {o} L {c} Green {c>=o}")
-        return c >= o
+                    d.columns=d.columns.get_level_values(0)
+                d=d.dropna()
+                o=float(d['Open'].iloc[-1])
+                c=float(d['Close'].iloc[-1])
+                return c>=o, o, c
+            return True,0,0
+        o=float(tdf['Open'].iloc[0])
+        c=float(tdf['Close'].iloc[-1])
+        return c>=o, o, c
     except Exception as e:
-        print(f"Nifty check fail {e}")
-        return True
+        print(f"Nifty check {e}")
+        return True,0,0
 
-def check_condition_1min(df):
+def check_1min_condition(df):
+    # first 3 green ignore, then red vol < min(all prev vol), open=low tag
     try:
-        if len(df) < 10:
-            return False
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df = df.dropna()
-        today = datetime.now(IST).date()
-        tdf = df[df.index.date == today].copy()
-        if len(tdf) < 8:
+            df.columns=df.columns.get_level_values(0)
+        df=df.dropna()
+        today=datetime.now(IST).date()
+        tdf=df[df.index.date==today].copy()
+        if len(tdf)<=4:
             return False
-        if len(tdf) <= 3:
-            return False
-        # Pehli 3 ignore
-        for real_idx in range(3, len(tdf)):
-            candle = tdf.iloc[real_idx]
-            try:
-                is_red = float(candle['Close']) < float(candle['Open'])
-            except:
-                continue
+        # pehli 3 ignore
+        for idx in range(3, len(tdf)):
+            candle=tdf.iloc[idx]
+            is_red = float(candle['Close']) < float(candle['Open'])
             if not is_red:
                 continue
-            prev_vols = tdf.iloc[:real_idx]['Volume'].astype(float).values
-            if len(prev_vols) < 4:
+            prev_vols = tdf.iloc[:idx]['Volume'].astype(float).values
+            if len(prev_vols)<3:
                 continue
-            min_vol = float(prev_vols.min())
+            min_vol = float(pd.Series(prev_vols).min())
             curr_vol = float(candle['Volume'])
+            # present red volume < din ki sabhi pehle candle ke volume se kam
             if curr_vol < min_vol:
-                day_open = float(tdf['Open'].iloc[0])
-                day_low = float(tdf['Low'].min())
-                open_eq_low = abs(day_open - day_low) / day_open * 100 < 0.25 if day_open!=0 else False
-                curr_price = float(candle['Close'])
-                sig_time = tdf.index[real_idx].strftime("%H:%M")
-                return True, curr_price, sig_time, open_eq_low, curr_vol, min_vol
+                day_open=float(tdf['Open'].iloc[0])
+                day_low=float(tdf['Low'].min())
+                # open = low check 0.25%
+                open_low = abs(day_open-day_low)/day_open*100 < 0.25 if day_open!=0 else False
+                price=float(candle['Close'])
+                sig_time=tdf.index[idx].strftime("%H:%M")
+                return True, price, sig_time, open_low, curr_vol, min_vol
         return False
     except Exception as e:
-        print(f"check 1min fail {e}")
+        print(f"check fail {e}")
         return False
 
 def scan():
-    now_dt = datetime.now(IST)
-    now = now_dt.strftime("%d-%m %I:%M %p")
+    now_dt=datetime.now(IST)
+    now=now_dt.strftime("%d-%m %I:%M %p")
     print(f"Time {now_dt}")
-    if now_dt.weekday() >= 5:
+    
+    if now_dt.weekday()>=5:
         send(f"Weekend {now} Market Closed")
         return
-    is_pre = now_dt.hour < 9 or (now_dt.hour==9 and now_dt.minute<15)
-    if not is_pre:
-        try:
-            nifty = yf.download("^NSEI", period="5d", interval="1d", progress=False, threads=False)
-            if isinstance(nifty.columns, pd.MultiIndex):
-                nifty.columns = nifty.columns.get_level_values(0)
-            if not nifty.empty:
-                last = nifty.index[-1].date()
-                today = now_dt.date()
-                gap = (today - last).days
-                if gap > 4:
-                    send(f"Holiday {now} Market Closed")
-                    return
-        except Exception as e:
-            print(f"Holiday check {e}")
 
-    if not is_nifty_green():
-        print("Nifty RED skip")
-        send(f"Info {now} Nifty RED - No Trade")
+    # Pre-market 9:15 se pehle
+    if now_dt.hour < 9 or (now_dt.hour==9 and now_dt.minute<15):
+        msg=f"Pre-Market {now} Waiting for 09:15"
+        print(msg)
+        # Subah 8:53 wala message nahi bhejna hai to comment kar de next line
+        # send(msg)
         return
 
-    top1, all_perf = get_top_sectors()
-    txt = "\n".join([f"{k}: {v:+.2f}%" for k,v in sorted(all_perf.items(), key=lambda x:x[1], reverse=True)[:6]])
-    msg = f"BREAKOUT {now} (1min) NIFTY GREEN\n{txt}\n"
-    sec_name, sec_pct = top1[0]
-    msg += f"\nTOP: {sec_name} {sec_pct:+.2f}%\n"
-    syms = STOCKS.get(sec_name, [])
+    # Market band 15:30 ke baad
+    if now_dt.hour>15 or (now_dt.hour==15 and now_dt.minute>30):
+        msg=f"Market Closed {now}"
+        print(msg)
+        return
+
+    # Holiday check
     try:
-        data = yf.download(syms, period="1d", interval="1m", group_by='ticker', progress=False, threads=True)
+        nifty_d = yf.download("^NSEI", period="5d", interval="1d", progress=False, threads=False)
+        if isinstance(nifty_d.columns, pd.MultiIndex):
+            nifty_d.columns=nifty_d.columns.get_level_values(0)
+        if not nifty_d.empty:
+            last=nifty_d.index[-1].date()
+            today=now_dt.date()
+            gap=(today-last).days
+            if gap>4:
+                send(f"Holiday {now} NSE Closed")
+                return
+    except:
+        pass
+
+    # Step 1: Nifty Green?
+    green, n_open, n_last = is_nifty_green()
+    if not green:
+        print(f"Nifty RED O {n_open} L {n_last}")
+        send(f"Info {now} Nifty RED - No Trade\nNifty Green nahi hai")
+        return
+
+    top1, all_perf = get_top_sector()
+    txt="\n".join([f"{k}: {v:+.2f}%" for k,v in sorted(all_perf.items(), key=lambda x:x[1], reverse=True)[:5]])
+    msg=f"BREAKOUT {now} (1min) NIFTY GREEN\n{txt}\n"
+    sec_name, sec_pct = top1[0]
+    msg+=f"\nTOP Sector: {sec_name} {sec_pct:+.2f}%\n"
+    
+    syms=STOCKS.get(sec_name, [])
+    try:
+        data=yf.download(syms, period="1d", interval="1m", group_by='ticker', progress=False, threads=True)
     except Exception as e:
         print(f"DL fail {e}")
-        send(msg + "\nData fail")
+        send(msg+"\nData fail")
         return
 
     found=False
     for sym in syms:
         try:
-            df = data[sym] if len(syms)>1 else data
+            df=data[sym] if len(syms)>1 else data
             if df.empty:
                 continue
-            res = check_condition_1min(df)
+            res=check_1min_condition(df)
             if not res:
                 continue
-            ok, curr, sig_time, open_low, vol, min_vol = res
+            ok, price, sig_time, open_low, vol, min_vol = res
             found=True
-            tag = " [O=LOW ⭐]" if open_low else ""
-            msg += f"{sym.replace('.NS','')} {curr:.0f} {sig_time} V{vol:.0f}<{min_vol:.0f}{tag}\n"
+            tag=" [O=LOW ⭐]" if open_low else ""
+            msg+=f"{sym.replace('.NS','')} {price:.0f} {sig_time} V{vol:.0f}<{min_vol:.0f}{tag}\n"
         except Exception as e:
             print(f"{sym} {e}")
             continue
 
     if not found:
-        msg += "\nNo Signal (1min)\nCond: 1st3 ignore, Red Vol < All Prev Min"
+        msg+="\nNo Signal (1min)\nCond: 1st 3 ignore, Red Vol < Min(Prev All)"
 
     print(msg)
     send(msg)
 
-if __name__ == "__main__":
+if __name__=="__main__":
     scan()
