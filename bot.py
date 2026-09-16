@@ -105,9 +105,9 @@ def is_nifty_green():
 def check_1min_condition(df):
     """
     STRICT CONDITION:
-    - Pehli 3 candle ignore (09:15,09:16,09:17)
-    - Uske baad jo bhi RED candle bane, uska volume aaj ki KISI BHI previous candle ke volume se kam hona chahiye
-    - Matlab Volume < MIN(all previous volumes today)
+    - Pehli 3 candle ignore
+    - RED candle ka volume aaj ki KISI BHI previous candle se kam hona chahiye = MIN
+    - Sirf last 15 min me bana signal dikhayega, purana repeat nahi
     """
     try:
         if isinstance(df.columns, pd.MultiIndex):
@@ -117,6 +117,31 @@ def check_1min_condition(df):
         tdf=df[df.index.date==today].copy()
         if len(tdf)<=4:
             return False
+        # Only check last 15 candles to avoid repeat of morning signal
+        start_idx = max(3, len(tdf)-15)
+        # First find MIN of all prev volumes for strict check, but only signal if recent
+        for idx in range(len(tdf)-1, start_idx-1, -1):  # reverse: latest first
+            candle=tdf.iloc[idx]
+            is_red = float(candle['Close']) < float(candle['Open'])
+            if not is_red:
+                continue
+            prev_vols = tdf.iloc[:idx]['Volume'].astype(float).values
+            if len(prev_vols)<3:
+                continue
+            min_vol = float(pd.Series(prev_vols).min())
+            curr_vol = float(candle['Volume'])
+            if curr_vol < min_vol:
+                day_open=float(tdf['Open'].iloc[0])
+                day_low=float(tdf['Low'].min())
+                open_low = abs(day_open-day_low)/day_open*100 < 0.25 if day_open!=0 else False
+                price=float(candle['Close'])
+                sig_time=tdf.index[idx].strftime("%H:%M")
+                return True, price, sig_time, open_low, curr_vol, min_vol
+        return False
+    except Exception as e:
+        print(f"check fail {e}")
+        return False
+
         # Pehli 3 ignore
         for idx in range(3, len(tdf)):
             candle=tdf.iloc[idx]
