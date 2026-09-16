@@ -76,7 +76,6 @@ def get_top_sector():
 
 def is_nifty_green():
     try:
-        # Try 1m first for live price
         df = yf.download("^NSEI", period="1d", interval="1m", progress=False, threads=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
@@ -88,8 +87,7 @@ def is_nifty_green():
                 o=float(tdf['Open'].iloc[0])
                 c=float(tdf['Close'].iloc[-1])
                 print(f"Nifty 1m O {o} C {c} Green {c>=o}")
-                return c>=o*0.998, o, c  # 0.2% tolerance, small red ko bhi green mano
-        # Fallback daily
+                return c>=o*0.998, o, c
         d=yf.download("^NSEI", period="2d", interval="1d", progress=False, threads=False)
         if isinstance(d.columns, pd.MultiIndex):
             d.columns=d.columns.get_level_values(0)
@@ -104,14 +102,13 @@ def is_nifty_green():
         print(f"Nifty check fail {e}")
         return True,0,0
 
-        o=float(tdf['Open'].iloc[0])
-        c=float(tdf['Close'].iloc[-1])
-        return c>=o, o, c
-    except Exception as e:
-        print(f"Nifty check {e}")
-        return True,0,0
-
 def check_1min_condition(df):
+    """
+    STRICT CONDITION:
+    - Pehli 3 candle ignore (09:15,09:16,09:17)
+    - Uske baad jo bhi RED candle bane, uska volume aaj ki KISI BHI previous candle ke volume se kam hona chahiye
+    - Matlab Volume < MIN(all previous volumes today)
+    """
     try:
         if isinstance(df.columns, pd.MultiIndex):
             df.columns=df.columns.get_level_values(0)
@@ -120,6 +117,7 @@ def check_1min_condition(df):
         tdf=df[df.index.date==today].copy()
         if len(tdf)<=4:
             return False
+        # Pehli 3 ignore
         for idx in range(3, len(tdf)):
             candle=tdf.iloc[idx]
             is_red = float(candle['Close']) < float(candle['Open'])
@@ -128,15 +126,16 @@ def check_1min_condition(df):
             prev_vols = tdf.iloc[:idx]['Volume'].astype(float).values
             if len(prev_vols)<3:
                 continue
-            avg_vol = float(pd.Series(prev_vols).mean())
+            min_vol = float(pd.Series(prev_vols).min())
             curr_vol = float(candle['Volume'])
-            if curr_vol < avg_vol*0.75:
+            # STRICT: Curr Vol < Sabhi Prev se kam
+            if curr_vol < min_vol:
                 day_open=float(tdf['Open'].iloc[0])
                 day_low=float(tdf['Low'].min())
                 open_low = abs(day_open-day_low)/day_open*100 < 0.25 if day_open!=0 else False
                 price=float(candle['Close'])
                 sig_time=tdf.index[idx].strftime("%H:%M")
-                return True, price, sig_time, open_low, curr_vol, avg_vol
+                return True, price, sig_time, open_low, curr_vol, min_vol
         return False
     except Exception as e:
         print(f"check fail {e}")
@@ -192,14 +191,15 @@ def scan():
             res=check_1min_condition(df)
             if not res:
                 continue
-            ok, price, sig_time, open_low, vol, avg_vol = res
+            ok, price, sig_time, open_low, vol, min_vol = res
             found=True
             tag=" [O=LOW ⭐]" if open_low else ""
-            msg+=f"{sym.replace('.NS','')} {price:.0f} {sig_time} V{vol:.0f}<Avg{avg_vol:.0f}{tag}\n"
-        except:
+            msg+=f"{sym.replace('.NS','')} {price:.0f} {sig_time} V{vol:.0f}<MIN{int(min_vol)} {tag}\n"
+        except Exception as e:
+            print(f"{sym} err {e}")
             continue
     if not found:
-        msg+="\nNo Signal (1min)\nCond: 1st 3 ignore, Red Vol < 75% Avg"
+        msg+="\nNo Signal (1min)\nCond: 1st 3 ignore, Red Vol < MIN(All Prev Vol Today)"
     print(msg)
     send(msg)
 
