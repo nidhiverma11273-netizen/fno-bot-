@@ -1,25 +1,37 @@
 name: F&O Bot
 on:
   schedule:
-    - cron: '15 3 * * 1-5'
-    - cron: '46 4 * * 1-5'
-    - cron: '34 5 * * 1-5'
+    - cron: '45 3 * * 1-5'  # 09:15 IST
+    - cron: '55 3 * * 1-5'  # 09:25 IST
+    - cron: '05 4 * * 1-5'  # 09:35 IST
+    - cron: '15 4 * * 1-5'  # 09:45 IST
+    - cron: '30 4 * * 1-5'  # 10:00 IST
+    - cron: '45 4 * * 1-5'  # 10:15 IST
+    - cron: '00 5 * * 1-5'  # 10:30 IST
+    - cron: '15 5 * * 1-5'  # 10:45 IST
+    - cron: '30 5 * * 1-5'  # 11:00 IST
+    - cron: '45 5 * * 1-5'  # 11:15 IST
+    - cron: '00 6 * * 1-5'  # 11:30 IST
+    - cron: '30 6 * * 1-5'  # 12:00 IST
+    - cron: '00 7 * * 1-5'  # 12:30 IST
+    - cron: '30 7 * * 1-5'  # 13:00 IST
+    - cron: '00 8 * * 1-5'  # 13:30 IST
+    - cron: '30 8 * * 1-5'  # 14:00 IST
+    - cron: '00 9 * * 1-5'  # 14:30 IST
+    - cron: '30 9 * * 1-5'  # 15:00 IST
+    - cron: '55 9 * * 1-5'  # 15:25 IST
   workflow_dispatch:
+
 jobs:
-  run:
+  scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-      - name: Install
-        run: pip install yfinance requests pytz pandas
-      - name: Run python bot.py
+          python-version: '3.11'
+      - run: pip install yfinance requests pytz pandas
+      - run: python bot.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: |
-          echo "Starting bot..."
-          python bot.py
-          echo "Finished bot..."
