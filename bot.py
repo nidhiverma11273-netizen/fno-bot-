@@ -7,6 +7,44 @@ import pandas as pd
 
 IST = pytz.timezone('Asia/Kolkata')
 
+# Zerodha ke asli NSE Sector Indexes - yahi se +0.62% wala sahi ayega
+SECTOR_INDEX = {
+    "REALTY": "NIFTYREALTY.NS",
+    "ENERGY": "NIFTYENERGY.NS", 
+    "AUTO": "NIFTYAUTO.NS",
+    "PVT BANK": "NIFTY_PVT_BANK.NS",
+    "METAL": "NIFTYMETAL.NS",
+    "MEDIA": "NIFTYMEDIA.NS",
+    "PHARMA": "NIFTYPHARMA.NS",
+    "IT": "NIFTYIT.NS",
+    "FMCG": "NIFTYFMCG.NS",
+    "INFRA": "NIFTYINFRA.NS",
+    "PSU BANK": "NIFTYPSUBANK.NS",
+    "OIL AND GAS": "CNXOIL.NS",
+    "DEFENCE": "HAL.NS",
+    "TELECOM": "BHARTIARTL.NS",
+    "FINTECH": "PAYTM.NS"
+}
+
+# Fallback tickers for yfinance
+SECTOR_FALLBACK = {
+    "REALTY": "^CNXREALTY",
+    "ENERGY": "^CNXENERGY",
+    "AUTO": "^CNXAUTO",
+    "PVT BANK": "^NSEBANK",
+    "METAL": "^CNXMETAL",
+    "MEDIA": "^CNXMEDIA",
+    "PHARMA": "^CNXPHARMA",
+    "IT": "^CNXIT",
+    "FMCG": "^CNXFMCG",
+    "INFRA": "^CNXINFRA",
+    "PSU BANK": "^CNXPSUBANK",
+    "OIL AND GAS": "^CNXOIL",
+    "DEFENCE": "HAL.NS",
+    "TELECOM": "BHARTIARTL.NS",
+    "FINTECH": "PAYTM.NS"
+}
+
 STOCKS = {
     "PHARMA": ["SUNPHARMA.NS","DIVISLAB.NS","CIPLA.NS","LAURUSLABS.NS"],
     "AUTO": ["MARUTI.NS","M&M.NS","TATAMOTORS.NS","EICHERMOT.NS"],
@@ -16,11 +54,13 @@ STOCKS = {
     "OIL AND GAS": ["RELIANCE.NS","ONGC.NS"],
     "IT": ["TCS.NS","INFY.NS","WIPRO.NS","HCLTECH.NS","TECHM.NS","LTIM.NS","PERSISTENT.NS"],
     "METAL": ["TATASTEEL.NS","JSWSTEEL.NS","HINDALCO.NS"],
-    "REALTY": ["DLF.NS","GODREJPROP.NS","OBEROIRLTY.NS"],
+    "REALTY": ["DLF.NS","GODREJPROP.NS","OBEROIRLTY.NS","PRESTIGE.NS","LODHA.NS"],
     "INFRA": ["LT.NS","ADANIENT.NS","ADANIPORTS.NS","INDUSTOWER.NS","BSE.NS"],
     "DEFENCE": ["HAL.NS","BEL.NS","MAZDOCK.NS","COCHINSHIP.NS"],
     "TELECOM": ["BHARTIARTL.NS","INDUSTOWER.NS","IDEA.NS"],
-    "FINTECH": ["PAYTM.NS","HDFCBANK.NS","BAJFINANCE.NS"]
+    "FINTECH": ["PAYTM.NS","HDFCBANK.NS","BAJFINANCE.NS"],
+    "MEDIA": ["ZEEL.NS","SUNTV.NS","PVRINOX.NS"],
+    "PSU BANK": ["SBIN.NS","BANKBARODA.NS","PNB.NS"]
 }
 
 def send(msg):
@@ -36,22 +76,36 @@ def send(msg):
 
 def get_top_sector():
     """
-    REAL sector % = us sector ke stocks ka average live %
-    Aaj ke Open se abhi tak ka % - isse REALTY ka sahi pata chalega
+    Zerodha jaisa asli NSE Sector Index % - Intraday Open vs LTP
     """
     perf = {}
-    # Saare stocks ek baar me download
-    all_tickers = []
-    for lst in STOCKS.values():
-        all_tickers.extend(lst)
-    all_tickers = list(set(all_tickers))
+    tickers = list(SECTOR_INDEX.values())
     try:
-        data = yf.download(all_tickers, period="1d", interval="1m", group_by='ticker', progress=False, threads=True)
-        for sec, syms in STOCKS.items():
-            sec_pcts = []
-            for sym in syms:
+        # Pehle asli NSE indexes try karo
+        data = yf.download(tickers, period="1d", interval="5m", group_by='ticker', progress=False, threads=True)
+        for sec, ticker in SECTOR_INDEX.items():
+            try:
+                df = data[ticker] if len(tickers)>1 else data
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                df=df.dropna()
+                if len(df)<2:
+                    continue
+                o=float(df['Open'].iloc[0])
+                c=float(df['Close'].iloc[-1])
+                if o==0: continue
+                pct=((c-o)/o)*100
+                perf[sec]=float(pct)
+            except:
+                continue
+        # Jo fail hua uske liye fallback
+        if len(perf)<3:
+            fb_tickers = list(SECTOR_FALLBACK.values())
+            data2 = yf.download(fb_tickers, period="1d", interval="5m", group_by='ticker', progress=False, threads=True)
+            for sec, ticker in SECTOR_FALLBACK.items():
+                if sec in perf: continue
                 try:
-                    df = data[sym] if len(all_tickers)>1 else data
+                    df = data2[ticker] if len(fb_tickers)>1 else data2
                     if isinstance(df.columns, pd.MultiIndex):
                         df.columns = df.columns.get_level_values(0)
                     df=df.dropna()
@@ -59,13 +113,9 @@ def get_top_sector():
                     o=float(df['Open'].iloc[0])
                     c=float(df['Close'].iloc[-1])
                     if o==0: continue
-                    pct = ((c-o)/o)*100
-                    sec_pcts.append(pct)
+                    perf[sec]=float(((c-o)/o)*100)
                 except:
                     continue
-            if sec_pcts:
-                avg = sum(sec_pcts)/len(sec_pcts)
-                perf[sec]=float(avg)
     except Exception as e:
         print(f"Sector fail {e}")
     if not perf:
@@ -75,7 +125,7 @@ def get_top_sector():
 
 def is_nifty_green():
     try:
-        df = yf.download("^NSEI", period="1d", interval="1m", progress=False, threads=False)
+        df = yf.download("^NSEI", period="1d", interval="5m", progress=False, threads=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df=df.dropna()
@@ -86,23 +136,13 @@ def is_nifty_green():
                 o=float(tdf['Open'].iloc[0])
                 c=float(tdf['Close'].iloc[-1])
                 return c>=o*0.998, o, c
-        d=yf.download("^NSEI", period="2d", interval="1d", progress=False, threads=False)
-        if isinstance(d.columns, pd.MultiIndex):
-            d.columns=d.columns.get_level_values(0)
-        d=d.dropna()
-        if not d.empty:
-            o=float(d['Open'].iloc[-1])
-            c=float(d['Close'].iloc[-1])
-            return c>=o*0.999, o, c
         return True,0,0
     except Exception as e:
-        print(f"Nifty check fail {e}")
         return True,0,0
 
 def check_1min_condition(df):
     """
-    STRICT: Red candle ka volume aaj ki kisi bhi previous candle se kam hona chahiye
-    Vol < MIN(All Prev Vol Today)
+    STRICT: Red candle ka volume aaj ki kisi bhi previous candle se kam
     """
     try:
         if isinstance(df.columns, pd.MultiIndex):
@@ -115,11 +155,9 @@ def check_1min_condition(df):
         for idx in range(3, len(tdf)):
             candle=tdf.iloc[idx]
             is_red = float(candle['Close']) < float(candle['Open'])
-            if not is_red:
-                continue
+            if not is_red: continue
             prev_vols = tdf.iloc[:idx]['Volume'].astype(float).values
-            if len(prev_vols)<3:
-                continue
+            if len(prev_vols)<3: continue
             min_vol = float(pd.Series(prev_vols).min())
             curr_vol = float(candle['Volume'])
             if curr_vol < min_vol:
@@ -137,15 +175,11 @@ def check_1min_condition(df):
 def scan():
     now_dt=datetime.now(IST)
     now=now_dt.strftime("%d-%m %I:%M %p")
-    print(f"Time {now_dt}")
     if now_dt.weekday()>=5:
-        send(f"Weekend {now} Market Closed")
-        return
+        send(f"Weekend {now} Market Closed"); return
     if now_dt.hour < 9 or (now_dt.hour==9 and now_dt.minute<15):
-        print(f"Pre-Market {now} Waiting")
         return
     if now_dt.hour>15 or (now_dt.hour==15 and now_dt.minute>30):
-        print(f"Market Closed {now}")
         return
     try:
         nifty_d = yf.download("^NSEI", period="5d", interval="1d", progress=False, threads=False)
@@ -153,43 +187,34 @@ def scan():
             nifty_d.columns=nifty_d.columns.get_level_values(0)
         if not nifty_d.empty:
             last=nifty_d.index[-1].date()
-            today=now_dt.date()
-            gap=(today-last).days
-            if gap>4:
-                send(f"Holiday {now} NSE Closed")
-                return
+            if (now_dt.date()-last).days>4:
+                send(f"Holiday {now} NSE Closed"); return
     except:
         pass
     green, n_open, n_last = is_nifty_green()
     nifty_status = "GREEN" if green else "RED"
-
     top1, all_perf = get_top_sector()
-    txt="\n".join([f"{k}: {v:+.2f}%" for k,v in sorted(all_perf.items(), key=lambda x:x[1], reverse=True)[:5]])
+    txt="\n".join([f"{k}: {v:+.2f}%" for k,v in sorted(all_perf.items(), key=lambda x:x[1], reverse=True)[:6]])
     msg=f"BREAKOUT {now} (1min) NIFTY {nifty_status}\n{txt}\n"
     sec_name, sec_pct = top1[0]
     msg+=f"\nTOP Sector: {sec_name} {sec_pct:+.2f}%\n"
     syms=STOCKS.get(sec_name, [])
-
     try:
         data=yf.download(syms, period="1d", interval="1m", group_by='ticker', progress=False, threads=True)
-    except Exception as e:
-        send(msg+"\nData fail")
-        return
+    except:
+        send(msg+"\nData fail"); return
     found=False
     for sym in syms:
         try:
             df=data[sym] if len(syms)>1 else data
-            if df.empty:
-                continue
+            if df.empty: continue
             res=check_1min_condition(df)
-            if not res:
-                continue
+            if not res: continue
             ok, price, sig_time, open_low, vol, min_vol = res
             found=True
             tag=" [O=LOW ⭐]" if open_low else ""
             msg+=f"{sym.replace('.NS','')} {price:.0f} {sig_time} V{vol:.0f}<MIN{int(min_vol)}{tag}\n"
-        except Exception as e:
-            print(f"{sym} err {e}")
+        except:
             continue
     if not found:
         msg+="\nNo Signal (1min)\nCond: 1st 3 ignore, Red Vol < MIN(All Prev Vol Today)"
