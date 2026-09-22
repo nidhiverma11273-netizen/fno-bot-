@@ -51,64 +51,82 @@ def send(msg):
         print(f"Send fail {e}")
 
 def get_top_sector():
+    """
+    LIVE intraday sector performance - Aaj ke Open se abhi tak kitna up
+    """
     perf = {}
     tickers = list(SECTOR_INDEX.values())
     try:
-        data = yf.download(tickers, period="5d", interval="1d", group_by='ticker', progress=False, threads=True)
+        # 1m data se aaj ka live % nikalenge
+        data = yf.download(tickers, period="1d", interval="1m", group_by='ticker', progress=False, threads=True)
         for sec, ticker in SECTOR_INDEX.items():
             try:
                 df = data[ticker] if len(tickers)>1 else data
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
+                df=df.dropna()
                 if len(df)<2:
                     continue
-                df = df.dropna()
-                pct = ((float(df['Close'].iloc[-1]) - float(df['Close'].iloc[-2])) / float(df['Close'].iloc[-2]))*100
+                # Aaj ka first open vs last price
+                o = float(df['Open'].iloc[0])
+                c = float(df['Close'].iloc[-1])
+                if o==0:
+                    continue
+                pct = ((c - o) / o)*100
                 perf[sec]=float(pct)
-            except:
+            except Exception as e:
+                # print(f"{sec} fail {e}")
                 continue
+        # Agar 1m fail ho to daily fallback
+        if not perf:
+            d = yf.download(tickers, period="2d", interval="1d", group_by='ticker', progress=False, threads=True)
+            for sec, ticker in SECTOR_INDEX.items():
+                try:
+                    df = d[ticker] if len(tickers)>1 else d
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = df.columns.get_level_values(0)
+                    df=df.dropna()
+                    if len(df)<2: continue
+                    pct = ((float(df['Close'].iloc[-1]) - float(df['Close'].iloc[-2])) / float(df['Close'].iloc[-2]))*100
+                    perf[sec]=float(pct)
+                except:
+                    continue
     except Exception as e:
         print(f"Sector fail {e}")
     if not perf:
-        return [("IT",0)], perf
+        return [("REALTY",0)], perf
     top1 = sorted(perf.items(), key=lambda x:x[1], reverse=True)[:1]
     return top1, perf
 
+
 def is_nifty_green():
     try:
-        df = yf.download("^NSEI", period="1d", interval="1m", progress=False, threads=False)
+        df = yf.download("^NSEI", period="1d", interval="5m", progress=False, threads=False)
+        if df.empty:
+            return True, 0, 0
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df=df.dropna()
         today=datetime.now(IST).date()
-        if not df.empty:
-            tdf=df[df.index.date==today]
-            if len(tdf)>=2:
-                o=float(tdf['Open'].iloc[0])
-                c=float(tdf['Close'].iloc[-1])
-                print(f"Nifty 1m O {o} C {c} Green {c>=o}")
-                return c>=o*0.998, o, c
-        d=yf.download("^NSEI", period="2d", interval="1d", progress=False, threads=False)
-        if isinstance(d.columns, pd.MultiIndex):
-            d.columns=d.columns.get_level_values(0)
-        d=d.dropna()
-        if not d.empty:
-            o=float(d['Open'].iloc[-1])
-            c=float(d['Close'].iloc[-1])
-            print(f"Nifty daily O {o} C {c}")
-            return c>=o*0.999, o, c
-        return True,0,0
+        tdf=df[df.index.date==today]
+        if len(tdf)<2:
+            d=yf.download("^NSEI", period="2d", interval="1d", progress=False, threads=False)
+            if not d.empty:
+                if isinstance(d.columns, pd.MultiIndex):
+                    d.columns=d.columns.get_level_values(0)
+                d=d.dropna()
+                o=float(d['Open'].iloc[-1])
+                c=float(d['Close'].iloc[-1])
+                return c>=o, o, c
+            return True,0,0
+        o=float(tdf['Open'].iloc[0])
+        c=float(tdf['Close'].iloc[-1])
+        return c>=o, o, c
     except Exception as e:
-        print(f"Nifty check fail {e}")
+        print(f"Nifty check {e}")
         return True,0,0
 
 def check_1min_condition(df):
-    """
-    STRICT CONDITION:
-    - Pehli 3 candle ignore
-    - RED candle ka volume aaj ki KISI BHI previous candle se kam hona chahiye = MIN
-    - Sirf last 15 min me bana signal dikhayega, purana repeat nahi
-    """
     try:
         if isinstance(df.columns, pd.MultiIndex):
             df.columns=df.columns.get_level_values(0)
@@ -117,32 +135,6 @@ def check_1min_condition(df):
         tdf=df[df.index.date==today].copy()
         if len(tdf)<=4:
             return False
-        # Only check last 15 candles to avoid repeat of morning signal
-        start_idx = max(3, len(tdf)-15)
-        # First find MIN of all prev volumes for strict check, but only signal if recent
-        for idx in range(len(tdf)-1, start_idx-1, -1):  # reverse: latest first
-            candle=tdf.iloc[idx]
-            is_red = float(candle['Close']) < float(candle['Open'])
-            if not is_red:
-                continue
-            prev_vols = tdf.iloc[:idx]['Volume'].astype(float).values
-            if len(prev_vols)<3:
-                continue
-            min_vol = float(pd.Series(prev_vols).min())
-            curr_vol = float(candle['Volume'])
-            if curr_vol < min_vol:
-                day_open=float(tdf['Open'].iloc[0])
-                day_low=float(tdf['Low'].min())
-                open_low = abs(day_open-day_low)/day_open*100 < 0.25 if day_open!=0 else False
-                price=float(candle['Close'])
-                sig_time=tdf.index[idx].strftime("%H:%M")
-                return True, price, sig_time, open_low, curr_vol, min_vol
-        return False
-    except Exception as e:
-        print(f"check fail {e}")
-        return False
-
-        # Pehli 3 ignore
         for idx in range(3, len(tdf)):
             candle=tdf.iloc[idx]
             is_red = float(candle['Close']) < float(candle['Open'])
@@ -151,16 +143,15 @@ def check_1min_condition(df):
             prev_vols = tdf.iloc[:idx]['Volume'].astype(float).values
             if len(prev_vols)<3:
                 continue
-            min_vol = float(pd.Series(prev_vols).min())
+            avg_vol = float(pd.Series(prev_vols).mean())
             curr_vol = float(candle['Volume'])
-            # STRICT: Curr Vol < Sabhi Prev se kam
-            if curr_vol < min_vol:
+            if curr_vol < avg_vol*0.75:
                 day_open=float(tdf['Open'].iloc[0])
                 day_low=float(tdf['Low'].min())
                 open_low = abs(day_open-day_low)/day_open*100 < 0.25 if day_open!=0 else False
                 price=float(candle['Close'])
                 sig_time=tdf.index[idx].strftime("%H:%M")
-                return True, price, sig_time, open_low, curr_vol, min_vol
+                return True, price, sig_time, open_low, curr_vol, avg_vol
         return False
     except Exception as e:
         print(f"check fail {e}")
@@ -216,15 +207,14 @@ def scan():
             res=check_1min_condition(df)
             if not res:
                 continue
-            ok, price, sig_time, open_low, vol, min_vol = res
+            ok, price, sig_time, open_low, vol, avg_vol = res
             found=True
             tag=" [O=LOW ⭐]" if open_low else ""
-            msg+=f"{sym.replace('.NS','')} {price:.0f} {sig_time} V{vol:.0f}<MIN{int(min_vol)} {tag}\n"
-        except Exception as e:
-            print(f"{sym} err {e}")
+            msg+=f"{sym.replace('.NS','')} {price:.0f} {sig_time} V{vol:.0f}<Avg{avg_vol:.0f}{tag}\n"
+        except:
             continue
     if not found:
-        msg+="\nNo Signal (1min)\nCond: 1st 3 ignore, Red Vol < MIN(All Prev Vol Today)"
+        msg+="\nNo Signal (1min)\nCond: 1st 3 ignore, Red Vol < 75% Avg"
     print(msg)
     send(msg)
 
