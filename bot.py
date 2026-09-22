@@ -184,12 +184,11 @@ def scan():
     except:
         pass
     green, n_open, n_last = is_nifty_green()
-    if not green:
-        send(f"Info {now} Nifty RED - No Trade")
-        return
+    nifty_status = "GREEN" if green else "RED"
+    # RED hone par bhi trade rokna nahi hai - sirf info dikhayenge
     top1, all_perf = get_top_sector()
     txt="\n".join([f"{k}: {v:+.2f}%" for k,v in sorted(all_perf.items(), key=lambda x:x[1], reverse=True)[:5]])
-    msg=f"BREAKOUT {now} (1min) NIFTY GREEN\n{txt}\n"
+    msg=f"BREAKOUT {now} (1min) NIFTY {nifty_status} (O {n_open:.0f})\n{txt}\n"
     sec_name, sec_pct = top1[0]
     msg+=f"\nTOP Sector: {sec_name} {sec_pct:+.2f}%\n"
     syms=STOCKS.get(sec_name, [])
