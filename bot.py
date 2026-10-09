@@ -118,12 +118,15 @@ def check_zerodha_condition(df):
             if not is_red:
                 continue
             
-            # Pehle ki sabhi candles ka volume (0 se idx-1 tak)
+            # Pehle ki sabhi candles ka volume (0 se idx-1 tak) - 0 volume ignore!
             prev_vols = tdf.iloc[0:idx]['Volume'].astype(float).values
-            if len(prev_vols) < 3:
+            prev_vols = [v for v in prev_vols if v > 0]  # FIX: yfinance gives V:0 at 09:15
+            if len(prev_vols) < 2:
                 continue
             
             min_vol = float(pd.Series(prev_vols).min())
+            if min_vol == 0:
+                continue
             curr_vol = float(candle['Volume'])
             
             # Red ka Volume sabse kam hona chahiye
