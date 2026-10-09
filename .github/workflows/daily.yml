@@ -1,8 +1,9 @@
 name: F&O Bot
 on:
   schedule:
-    - cron: '*/5 3-9 * * 1-5'
+    - cron: '*/5 * * * 1-5'
   workflow_dispatch:
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -11,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install yfinance requests pytz pandas
+      - run: pip install yfinance requests pytz pandas --upgrade
       - run: python bot.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
