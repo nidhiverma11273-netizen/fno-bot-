@@ -1,9 +1,8 @@
 name: F&O Bot
 on:
   schedule:
-    - cron: '*/5 3-9 * * 1-5' # Har 5 min 09:00 to 15:30 IST
+    - cron: '*/5 3-9 * * 1-5'
   workflow_dispatch:
-
 jobs:
   scan:
     runs-on: ubuntu-latest
