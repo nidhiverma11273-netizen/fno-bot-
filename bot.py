@@ -118,15 +118,12 @@ def check_zerodha_condition(df):
             if not is_red:
                 continue
             
-            # Pehle ki sabhi candles ka volume (0 se idx-1 tak) - 0 volume ignore!
+            # Pehle ki sabhi candles ka volume (0 se idx-1 tak)
             prev_vols = tdf.iloc[0:idx]['Volume'].astype(float).values
-            prev_vols = [v for v in prev_vols if v > 0]  # FIX: yfinance gives V:0 at 09:15
-            if len(prev_vols) < 2:
+            if len(prev_vols) < 3:
                 continue
             
             min_vol = float(pd.Series(prev_vols).min())
-            if min_vol == 0:
-                continue
             curr_vol = float(candle['Volume'])
             
             # Red ka Volume sabse kam hona chahiye
@@ -147,11 +144,14 @@ def scan():
     now=now_dt.strftime("%d-%m %I:%M %p")
     print(f"Time {now_dt}")
     if now_dt.weekday()>=5:
-        send(f"Weekend {now} Market Closed")
+        # Weekend - chup raho, raat ko message mat bhejo
+        print(f"Weekend {now} - Skip")
         return
     if now_dt.hour < 9 or (now_dt.hour==9 and now_dt.minute<15):
+        print("Before market - Skip")
         return
     if now_dt.hour>15 or (now_dt.hour==15 and now_dt.minute>30):
+        print("After market - Skip")
         return
     try:
         nifty_d = yf.download("^NSEI", period="5d", interval="1d", progress=False, threads=False)
@@ -162,7 +162,7 @@ def scan():
             today=now_dt.date()
             gap=(today-last).days
             if gap>4:
-                send(f"Holiday {now} NSE Closed")
+                print(f"Holiday {now} NSE Closed - Skip")
                 return
     except: pass
 
