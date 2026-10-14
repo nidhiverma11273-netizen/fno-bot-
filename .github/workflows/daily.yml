@@ -1,8 +1,14 @@
 name: F&O Bot
 on:
   schedule:
-    - cron: '*/15 3-10 * * 1-5'
+    # 8:45 AM to 3:30 PM IST = 3:15 to 10:00 UTC, every 15 min, Mon-Fri
+    - cron: '15,30,45 3-9 * * 1-5'
+    - cron: '0,15,30 10 * * 1-5'
   workflow_dispatch:
+
+concurrency:
+  group: fo-bot
+  cancel-in-progress: false
 
 jobs:
   scan:
@@ -12,8 +18,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install yfinance requests pytz pandas --upgrade
-      - run: python bot.py
+      - run: |
+          pip install yfinance pandas requests pytz
+          python bot.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+
