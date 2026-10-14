@@ -4,24 +4,16 @@ import os
 import pytz
 from datetime import datetime
 import pandas as pd
+import time
 
 IST = pytz.timezone('Asia/Kolkata')
 
 SECTOR_INDEX = {
-    "PHARMA": "^CNXPHARMA",
-    "AUTO": "^CNXAUTO",
-    "ENERGY": "^CNXENERGY",
-    "PVT BANK": "^NSEBANK",
-    "PSU BANK": "^CNXPSUBANK",
-    "FMCG": "^CNXFMCG",
-    "OIL AND GAS": "^CNXOIL",
-    "IT": "^CNXIT",
-    "METAL": "^CNXMETAL",
-    "REALTY": "^CNXREALTY",
-    "INFRA": "^CNXINFRA",
-    "DEFENCE": "HAL.NS",
-    "TELECOM": "BHARTIARTL.NS",
-    "FINTECH": "PAYTM.NS"
+    "PHARMA": "^CNXPHARMA", "AUTO": "^CNXAUTO", "ENERGY": "^CNXENERGY",
+    "PVT BANK": "^NSEBANK", "PSU BANK": "^CNXPSUBANK", "FMCG": "^CNXFMCG",
+    "OIL AND GAS": "^CNXOIL", "IT": "^CNXIT", "METAL": "^CNXMETAL",
+    "REALTY": "^CNXREALTY", "INFRA": "^CNXINFRA",
+    "DEFENCE": "HAL.NS", "TELECOM": "BHARTIARTL.NS", "FINTECH": "PAYTM.NS"
 }
 
 STOCKS = {
@@ -45,49 +37,14 @@ def send(msg):
     BOT = os.environ.get('BOT_TOKEN')
     CHAT = os.environ.get('CHAT_ID')
     if not BOT or not CHAT:
+        print("BOT_TOKEN/CHAT_ID missing")
         return
     try:
         url = f"https://api.telegram.org/bot{BOT}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT, "text": msg}, timeout=15)
+        r = requests.post(url, data={"chat_id": CHAT, "text": msg}, timeout=20)
+        print(f"Telegram sent: {r.status_code}")
     except Exception as e:
         print(f"Send fail {e}")
-
-def get_top_sector():
-    perf = {}
-    tickers = list(SECTOR_INDEX.values())
-    try:
-        data = yf.download(tickers, period="1d", interval="1m", group_by='ticker', progress=False, threads=True)
-        for sec, ticker in SECTOR_INDEX.items():
-            try:
-                df = data[ticker] if len(tickers)>1 else data
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
-                df=df.dropna()
-                if len(df)<2: continue
-                o = float(df['Open'].iloc[0])
-                c = float(df['Close'].iloc[-1])
-                if o==0: continue
-                pct = ((c - o) / o)*100
-                perf[sec]=float(pct)
-            except: continue
-        if not perf:
-            d = yf.download(tickers, period="2d", interval="1d", group_by='ticker', progress=False, threads=True)
-            for sec, ticker in SECTOR_INDEX.items():
-                try:
-                    df = d[ticker] if len(tickers)>1 else d
-                    if isinstance(df.columns, pd.MultiIndex):
-                        df.columns = df.columns.get_level_values(0)
-                    df=df.dropna()
-                    if len(df)<2: continue
-                    pct = ((float(df['Close'].iloc[-1]) - float(df['Close'].iloc[-2])) / float(df['Close'].iloc[-2]))*100
-                    perf[sec]=float(pct)
-                except: continue
-    except Exception as e:
-        print(f"Sector fail {e}")
-    if not perf:
-        return [("IT",0)], perf
-    top1 = sorted(perf.items(), key=lambda x:x[1], reverse=True)[:1]
-    return top1, perf
 
 def to_ist(df):
     try:
@@ -101,13 +58,50 @@ def to_ist(df):
         except:
             return df
 
-def check_zerodha_condition(df, debug_sym=""):
-    """
-    ZERODHA EXACT CONDITION:
-    1. Pehli 3 candle GREEN (Close > Open)
-    2. Uske baad koi RED candle jiska Volume pehle ki SABHI candle ke Volume se kam ho
-    FIX: yfinance ka index UTC me aata hai, IST me convert karke date filter karna hai + 0 volume ignore
-    """
+def get_top_sector():
+    perf = {}
+    tickers = list(SECTOR_INDEX.values())
+    for attempt in range(2):
+        try:
+            data = yf.download(tickers, period="1d", interval="1m", group_by='ticker', progress=False, threads=True, timeout=30)
+            for sec, ticker in SECTOR_INDEX.items():
+                try:
+                    df = data[ticker] if len(tickers)>1 else data
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = df.columns.get_level_values(0)
+                    df=df.dropna()
+                    if len(df)<2: continue
+                    o = float(df['Open'].iloc[0])
+                    c = float(df['Close'].iloc[-1])
+                    if o==0: continue
+                    pct = ((c - o) / o)*100
+                    perf[sec]=float(pct)
+                except: continue
+            if perf:
+                break
+        except Exception as e:
+            print(f"Sector attempt {attempt} fail {e}")
+            time.sleep(2)
+    if not perf:
+        try:
+            d = yf.download(tickers, period="2d", interval="1d", group_by='ticker', progress=False, threads=True)
+            for sec, ticker in SECTOR_INDEX.items():
+                try:
+                    df = d[ticker] if len(tickers)>1 else d
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = df.columns.get_level_values(0)
+                    df=df.dropna()
+                    if len(df)<2: continue
+                    pct = ((float(df['Close'].iloc[-1]) - float(df['Close'].iloc[-2])) / float(df['Close'].iloc[-2]))*100
+                    perf[sec]=float(pct)
+                except: continue
+        except: pass
+    if not perf:
+        return [("IT",0)], {}
+    top1 = sorted(perf.items(), key=lambda x:x[1], reverse=True)[:1]
+    return top1, perf
+
+def check_zerodha_condition(df):
     try:
         if isinstance(df.columns, pd.MultiIndex):
             df.columns=df.columns.get_level_values(0)
@@ -116,28 +110,21 @@ def check_zerodha_condition(df, debug_sym=""):
         today=datetime.now(IST).date()
         tdf=df[df.index.date==today].copy()
         if len(tdf) <= 4:
-            if debug_sym:
-                print(f"{debug_sym} len {len(tdf)} <=4 skip")
             return False
         
-        # Condition 1: Pehli 3 candle GREEN honi chahiye
         first3 = tdf.iloc[0:3]
         for i in range(3):
             c = first3.iloc[i]
             if float(c['Close']) <= float(c['Open']):
-                if debug_sym=="HCLTECH.NS":
-                    print(f"HCLTECH first3 fail at {i} O={c['Open']} C={c['Close']}")
                 return False
         
-        # Condition 2: 4th candle se Red dhoondo jiska Vol < MIN(All Prev Vol)
         for idx in range(3, len(tdf)):
             candle = tdf.iloc[idx]
-            is_red = float(candle['Close']) < float(candle['Open'])
-            if not is_red:
+            if float(candle['Close']) >= float(candle['Open']):
                 continue
             
             prev_vols = tdf.iloc[0:idx]['Volume'].astype(float).values
-            prev_vols = [v for v in prev_vols if v > 0]  # yfinance 09:15 pe 0 volume deta hai kabhi
+            prev_vols = [v for v in prev_vols if v > 0]
             if len(prev_vols) < 3:
                 continue
             
@@ -153,19 +140,18 @@ def check_zerodha_condition(df, debug_sym=""):
                 price = float(candle['Close'])
                 sig_time = tdf.index[idx].strftime("%H:%M")
                 return True, price, sig_time, open_low, curr_vol, min_vol
-        if debug_sym=="HCLTECH.NS":
-            print(f"HCLTECH no red low vol found till {len(tdf)} candles")
         return False
     except Exception as e:
-        print(f"check fail {e} {debug_sym}")
+        print(f"check fail {e}")
         return False
 
 def scan():
     now_dt=datetime.now(IST)
     now=now_dt.strftime("%d-%m %I:%M %p")
-    print(f"Time {now_dt}")
+    print(f"=== Time {now_dt} ===")
+    
+    # Weekend / Market time filter - No spam at night
     if now_dt.weekday()>=5:
-        # Weekend - chup raho, raat ko message mat bhejo
         print(f"Weekend {now} - Skip")
         return
     if now_dt.hour < 9 or (now_dt.hour==9 and now_dt.minute<15):
@@ -174,8 +160,10 @@ def scan():
     if now_dt.hour>15 or (now_dt.hour==15 and now_dt.minute>30):
         print("After market - Skip")
         return
+
+    # Holiday check - only once per day message
     try:
-        nifty_d = yf.download("^NSEI", period="5d", interval="1d", progress=False, threads=False)
+        nifty_d = yf.download("^NSEI", period="5d", interval="1d", progress=False, threads=False, timeout=20)
         if isinstance(nifty_d.columns, pd.MultiIndex):
             nifty_d.columns=nifty_d.columns.get_level_values(0)
         if not nifty_d.empty:
@@ -183,18 +171,18 @@ def scan():
             today=now_dt.date()
             gap=(today-last).days
             if gap>4:
-                # Holiday hai to market time me bata do, raat ko chup raho
-                if 9 <= now_dt.hour <= 15:
-                    send(f"🏖️ Holiday {now} NSE Closed - No Trading Today")
+                send(f"🏖️ Holiday {now} NSE Closed")
                 print(f"Holiday {now} NSE Closed")
                 return
     except Exception as e:
         print(f"Holiday check fail {e}")
 
+    # Nifty trend
     try:
-        df_n = yf.download("^NSEI", period="1d", interval="5m", progress=False, threads=False)
+        df_n = yf.download("^NSEI", period="1d", interval="5m", progress=False, threads=False, timeout=20)
         if isinstance(df_n.columns, pd.MultiIndex):
             df_n.columns = df_n.columns.get_level_values(0)
+        df_n=to_ist(df_n)
         df_n=df_n.dropna()
         today=datetime.now(IST).date()
         tdf_n=df_n[df_n.index.date==today]
@@ -212,31 +200,27 @@ def scan():
     sec_name, sec_pct = top1[0]
     msg+=f"\nTOP Sector: {sec_name} {sec_pct:+.2f}%\n"
     
-    # FIX: TOP sector ke saath IT sector ko bhi hamesha scan karo (HCLTECH miss na ho)
-    # Saare unique symbols ek baar me download
     all_syms = list(set(sum(STOCKS.values(), [])))
-    # HCLTECH ko priority list me aage rakho
     if "HCLTECH.NS" in all_syms:
         all_syms.remove("HCLTECH.NS")
         all_syms = ["HCLTECH.NS"] + all_syms
     
     try:
-        data=yf.download(all_syms, period="1d", interval="1m", group_by='ticker', progress=False, threads=True)
+        data=yf.download(all_syms, period="1d", interval="1m", group_by='ticker', progress=False, threads=True, timeout=60)
     except Exception as e:
-        send(msg+"\nData fail "+str(e))
+        print(f"Data fail {e}")
+        send(msg+f"\nData fail, retry in 15 min")
         return
     
     found=False
-    # Pehle TOP sector wale check karo
     top_syms = STOCKS.get(sec_name, [])
     check_order = top_syms + [s for s in all_syms if s not in top_syms]
     
-    for sym in check_order[:20]:  # Pehle 20 stocks check karo taki time bache
+    for sym in check_order[:25]:
         try:
             df=data[sym] if len(all_syms)>1 else data
             if df.empty: continue
-            debug = sym if sym=="HCLTECH.NS" else ""
-            res=check_zerodha_condition(df, debug_sym=debug)
+            res=check_zerodha_condition(df)
             if not res: continue
             ok, price, sig_time, open_low, vol, min_vol = res
             found=True
@@ -245,8 +229,10 @@ def scan():
         except Exception as e:
             print(f"{sym} err {e}")
             continue
+            
     if not found:
-        msg+="\nNo Signal (1min)\nCond: 1st 3 GREEN + Red Vol < MIN(All Prev Vol)"
+        msg+="\nNo Signal (1min)\nCond: 1st 3 GREEN + Red Vol < MIN(All Prev)"
+    
     print(msg)
     send(msg)
 
