@@ -183,9 +183,13 @@ def scan():
             today=now_dt.date()
             gap=(today-last).days
             if gap>4:
-                print(f"Holiday {now} NSE Closed - Skip")
+                # Holiday hai to market time me bata do, raat ko chup raho
+                if 9 <= now_dt.hour <= 15:
+                    send(f"🏖️ Holiday {now} NSE Closed - No Trading Today")
+                print(f"Holiday {now} NSE Closed")
                 return
-    except: pass
+    except Exception as e:
+        print(f"Holiday check fail {e}")
 
     try:
         df_n = yf.download("^NSEI", period="1d", interval="5m", progress=False, threads=False)
